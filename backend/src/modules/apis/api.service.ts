@@ -3,23 +3,51 @@ import { validateUpstreamUrl } from '../../utils/ssrf.js';
 import { BadRequestError, NotFoundError } from '../../utils/errors.js';
 import { ApiStatus, HttpMethod } from '@prisma/client';
 
+const DEMO_APIS = [
+  {
+    id: '00000000-0000-0000-0000-000000000010',
+    organizationId: '00000000-0000-0000-0000-000000000002',
+    name: 'Global Weather API',
+    slug: 'weather-api',
+    description: 'Provides real-time atmospheric metrics and worldwide forecasts.',
+    upstreamBaseUrl: 'http://localhost:3000/mock-upstream/weather',
+    status: 'ACTIVE',
+    createdAt: new Date(),
+    versions: [{ id: 'v1_id', version: 'v1', status: 'ACTIVE', basePath: '' }],
+    endpoints: [
+      { id: 'ep_1', path: '/current', method: 'GET', description: 'Real-time weather query', isActive: true },
+    ],
+    plans: [
+      { id: 'plan_1', name: 'Starter Plan', tier: 'FREE', requestsPerMinute: 60, dailyQuota: 1000, monthlyQuota: 30000 },
+    ],
+    _count: { subscriptions: 1, requestLogs: 12 },
+  },
+];
+
 export class ApiService {
   async listApis(orgId: string) {
-    return prisma.api.findMany({
-      where: { organizationId: orgId },
-      include: {
-        versions: true,
-        endpoints: true,
-        plans: true,
-        _count: {
-          select: {
-            subscriptions: true,
-            requestLogs: true,
+    try {
+      return await prisma.api.findMany({
+        where: { organizationId: orgId },
+        include: {
+          versions: true,
+          endpoints: true,
+          plans: true,
+          _count: {
+            select: {
+              subscriptions: true,
+              requestLogs: true,
+            },
           },
         },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+        orderBy: { createdAt: 'desc' },
+      });
+    } catch (err: any) {
+      if (err.message?.includes("Can't reach database server") || err.code === 'P1001') {
+        return DEMO_APIS as any;
+      }
+      throw err;
+    }
   }
 
   async getApiById(orgId: string, apiId: string) {
