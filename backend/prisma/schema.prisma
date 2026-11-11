@@ -1,0 +1,382 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+  DEVELOPER
+}
+
+enum MemberStatus {
+  ACTIVE
+  INVITED
+}
+
+enum ApiStatus {
+  DRAFT
+  ACTIVE
+  DEPRECATED
+  DISABLED
+}
+
+enum HttpMethod {
+  GET
+  POST
+  PUT
+  PATCH
+  DELETE
+  OPTIONS
+  HEAD
+}
+
+enum AppStatus {
+  ACTIVE
+  SUSPENDED
+  DELETED
+}
+
+enum KeyEnvironment {
+  TEST
+  LIVE
+}
+
+enum KeyStatus {
+  ACTIVE
+  REVOKED
+  EXPIRED
+}
+
+enum PlanTier {
+  FREE
+  PRO
+  ENTERPRISE
+}
+
+enum BillingInterval {
+  MONTHLY
+  YEARLY
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELLED
+  SUSPENDED
+}
+
+enum PeriodType {
+  MINUTE
+  HOUR
+  DAY
+  MONTH
+}
+
+enum WebhookStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum DeliveryStatus {
+  PENDING
+  DELIVERED
+  FAILED
+}
+
+model User {
+  id                String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email             String               @unique
+  name              String
+  passwordHash      String
+  resetToken        String?
+  resetTokenExpiry  DateTime?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  memberships       OrganizationMember[]
+  applications      Application[]
+  auditLogs         AuditLog[]
+
+  @@map("users")
+}
+
+model Organization {
+  id           String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name         String
+  slug         String               @unique
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+  members      OrganizationMember[]
+  apis         Api[]
+  applications Application[]
+  requestLogs  RequestLog[]
+  usageRecords UsageRecord[]
+  auditLogs    AuditLog[]
+  webhooks     Webhook[]
+
+  @@map("organizations")
+}
+
+model OrganizationMember {
+  id             String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId         String         @db.Uuid
+  organizationId String         @db.Uuid
+  role           Role           @default(DEVELOPER)
+  status         MemberStatus   @default(ACTIVE)
+  inviteEmail    String?
+  createdAt      DateTime       @default(now())
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+  @@index([organizationId])
+  @@map("organization_members")
+}
+
+model Api {
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId  String         @db.Uuid
+  name            String
+  slug            String         @unique
+  description     String?
+  upstreamBaseUrl String
+  status          ApiStatus      @default(DRAFT)
+  openApiSpec     Json?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  versions      ApiVersion[]
+  endpoints     ApiEndpoint[]
+  plans         ApiPlan[]
+  subscriptions Subscription[]
+  requestLogs   RequestLog[]
+  usageRecords  UsageRecord[]
+
+  @@index([organizationId])
+  @@map("apis")
+}
+
+model ApiVersion {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  apiId     String    @db.Uuid
+  version   String    // e.g. "v1", "v2"
+  status    ApiStatus @default(ACTIVE)
+  basePath  String    @default("")
+  createdAt DateTime  @default(now())
+
+  api         Api           @relation(fields: [apiId], references: [id], onDelete: Cascade)
+  endpoints   ApiEndpoint[]
+  requestLogs RequestLog[]
+
+  @@unique([apiId, version])
+  @@map("api_versions")
+}
+
+model ApiEndpoint {
+  id             String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  apiId          String      @db.Uuid
+  apiVersionId   String      @db.Uuid
+  path           String      // e.g. "/users", "/weather"
+  method         HttpMethod  @default(GET)
+  description    String?
+  requestSchema  Json?
+  responseSchema Json?
+  isActive       Boolean     @default(true)
+  createdAt      DateTime    @default(now())
+
+  api        Api        @relation(fields: [apiId], references: [id], onDelete: Cascade)
+  apiVersion ApiVersion @relation(fields: [apiVersionId], references: [id], onDelete: Cascade)
+
+  @@index([apiId, apiVersionId])
+  @@map("api_endpoints")
+}
+
+model Application {
+  id             String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String         @db.Uuid
+  createdById    String         @db.Uuid
+  name           String
+  description    String?
+  status         AppStatus      @default(ACTIVE)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy     User           @relation(fields: [createdById], references: [id])
+  apiKeys       ApiKey[]
+  subscriptions Subscription[]
+  requestLogs   RequestLog[]
+  usageRecords  UsageRecord[]
+
+  @@index([organizationId])
+  @@map("applications")
+}
+
+model ApiKey {
+  id            String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  applicationId String         @db.Uuid
+  keyPrefix     String         // e.g. "ng_live_12345678"
+  keyHash       String         @unique // SHA-256 hash of entire key
+  environment   KeyEnvironment @default(LIVE)
+  status        KeyStatus      @default(ACTIVE)
+  scopes        Json?          // Array of allowed scopes/endpoints
+  expiresAt     DateTime?
+  lastUsedAt    DateTime?
+  revokedAt     DateTime?
+  createdAt     DateTime       @default(now())
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([keyPrefix])
+  @@index([applicationId])
+  @@map("api_keys")
+}
+
+model ApiPlan {
+  id                String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  apiId             String          @db.Uuid
+  name              String
+  tier              PlanTier        @default(FREE)
+  requestsPerMinute Int             @default(60)
+  dailyQuota        Int             @default(1000)
+  monthlyQuota      Int             @default(30000)
+  features          Json?
+  price             Decimal         @default(0) @db.Decimal(10, 2)
+  billingInterval   BillingInterval @default(MONTHLY)
+  status            String          @default("ACTIVE")
+  createdAt         DateTime        @default(now())
+
+  api           Api            @relation(fields: [apiId], references: [id], onDelete: Cascade)
+  subscriptions Subscription[]
+
+  @@index([apiId])
+  @@map("api_plans")
+}
+
+model Subscription {
+  id            String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  applicationId String             @db.Uuid
+  apiPlanId     String             @db.Uuid
+  apiId         String             @db.Uuid
+  status        SubscriptionStatus @default(ACTIVE)
+  startDate     DateTime           @default(now())
+  endDate       DateTime?
+  createdAt     DateTime           @default(now())
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  apiPlan     ApiPlan     @relation(fields: [apiPlanId], references: [id], onDelete: Cascade)
+  api         Api         @relation(fields: [apiId], references: [id], onDelete: Cascade)
+
+  @@unique([applicationId, apiId])
+  @@index([applicationId])
+  @@index([apiId])
+  @@map("subscriptions")
+}
+
+model RequestLog {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String    @db.Uuid
+  applicationId  String?   @db.Uuid
+  apiId          String?   @db.Uuid
+  apiVersionId   String?   @db.Uuid
+  method         String
+  path           String
+  statusCode     Int
+  latencyMs      Int
+  errorCategory  String?
+  requestId      String
+  ipAddress      String?
+  createdAt      DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  application  Application? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  api          Api?         @relation(fields: [apiId], references: [id], onDelete: SetNull)
+  apiVersion   ApiVersion?  @relation(fields: [apiVersionId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, createdAt])
+  @@index([applicationId, createdAt])
+  @@index([apiId, createdAt])
+  @@map("request_logs")
+}
+
+model UsageRecord {
+  id             String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String     @db.Uuid
+  applicationId  String?    @db.Uuid
+  apiId          String?    @db.Uuid
+  period         PeriodType @default(HOUR)
+  periodStart    DateTime
+  requestCount   Int        @default(0)
+  successCount   Int        @default(0)
+  failureCount   Int        @default(0)
+  avgLatencyMs   Int        @default(0)
+  createdAt      DateTime   @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  application  Application? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  api          Api?         @relation(fields: [apiId], references: [id], onDelete: SetNull)
+
+  @@unique([applicationId, apiId, period, periodStart])
+  @@index([organizationId, periodStart])
+  @@map("usage_records")
+}
+
+model AuditLog {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @db.Uuid
+  userId         String?  @db.Uuid
+  action         String
+  resource       String
+  resourceId     String?
+  metadata       Json?
+  ipAddress      String?
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, createdAt])
+  @@map("audit_logs")
+}
+
+model Webhook {
+  id             String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String          @db.Uuid
+  url            String
+  events         Json            // e.g. ["api.created", "key.revoked", "quota.warning"]
+  secret         String
+  status         WebhookStatus   @default(ACTIVE)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  deliveries   WebhookDelivery[]
+
+  @@index([organizationId])
+  @@map("webhooks")
+}
+
+model WebhookDelivery {
+  id           String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  webhookId    String         @db.Uuid
+  event        String
+  payload      Json
+  statusCode   Int?
+  attempts     Int            @default(0)
+  status       DeliveryStatus @default(PENDING)
+  responseBody String?
+  nextRetryAt  DateTime?
+  deliveredAt  DateTime?
+  createdAt    DateTime       @default(now())
+
+  webhook Webhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  @@index([webhookId, createdAt])
+  @@map("webhook_deliveries")
+}

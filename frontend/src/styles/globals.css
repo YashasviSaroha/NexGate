@@ -1,0 +1,128 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Light Mode: Bento & Straight-Line Grids */
+    --background: 220 20% 98%;
+    --foreground: 224 35% 12%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 224 35% 12%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 224 35% 12%;
+
+    /* NexGate Brand Violet-Blue */
+    --primary: 252 85% 60%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 224 35% 18%;
+
+    --muted: 220 14% 94%;
+    --muted-foreground: 220 10% 46%;
+
+    --accent: 250 85% 97%;
+    --accent-foreground: 252 85% 55%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 98%;
+
+    --success: 142 71% 45%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 48 96% 12%;
+
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 252 85% 60%;
+
+    --sidebar: 0 0% 100%;
+    --sidebar-foreground: 224 35% 15%;
+    --sidebar-border: 220 13% 91%;
+
+    --radius: 0.65rem;
+
+    --chart-1: 252 85% 60%;
+    --chart-2: 199 89% 48%;
+    --chart-3: 142 71% 45%;
+    --chart-4: 38 92% 50%;
+    --chart-5: 280 84% 60%;
+  }
+
+  .dark {
+    /* Dark Mode: Cinematic Dark Mode & Neon Accents */
+    --background: 232 28% 7%;
+    --foreground: 220 14% 96%;
+
+    --card: 232 25% 10%;
+    --card-foreground: 220 14% 96%;
+
+    --popover: 232 25% 10%;
+    --popover-foreground: 220 14% 96%;
+
+    /* NexGate Vivid Neon Purple */
+    --primary: 265 90% 66%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 232 20% 15%;
+    --secondary-foreground: 220 14% 96%;
+
+    --muted: 232 20% 16%;
+    --muted-foreground: 220 10% 60%;
+
+    --accent: 265 60% 18%;
+    --accent-foreground: 265 90% 80%;
+
+    --destructive: 0 75% 58%;
+    --destructive-foreground: 0 0% 98%;
+
+    --success: 142 76% 45%;
+    --success-foreground: 142 76% 96%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 48 96% 12%;
+
+    --border: 232 20% 18%;
+    --input: 232 20% 18%;
+    --ring: 265 90% 66%;
+
+    --sidebar: 232 30% 8%;
+    --sidebar-foreground: 220 14% 94%;
+    --sidebar-border: 232 20% 15%;
+
+    --chart-1: 265 90% 66%;
+    --chart-2: 199 95% 55%;
+    --chart-3: 142 76% 48%;
+    --chart-4: 38 92% 55%;
+    --chart-5: 320 85% 65%;
+  }
+}
+
+body {
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  letter-spacing: -0.011em;
+}
+
+code, pre, .font-mono {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.2);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.4);
+}
