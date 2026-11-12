@@ -7,6 +7,7 @@ import {
   BarChart3,
   ScrollText,
   BookOpen,
+  Sparkles,
   Terminal,
   CreditCard,
   Webhook,
@@ -26,6 +27,7 @@ const NAV_ITEMS = [
   { name: 'Analytics', path: '/analytics', icon: BarChart3 },
   { name: 'Request Logs', path: '/request-logs', icon: ScrollText },
   { name: 'API Docs', path: '/docs', icon: BookOpen },
+  { name: 'AI Assistant', path: '/assistant', icon: Sparkles },
   { name: 'Playground', path: '/playground', icon: Terminal },
   { name: 'Subscriptions', path: '/subscriptions', icon: CreditCard },
   { name: 'Webhooks', path: '/webhooks', icon: Webhook },
@@ -38,7 +40,7 @@ export function Sidebar({ className }: { className?: string }) {
 
   const handleLogout = async () => {
     await logout();
-    navigate('/login');
+    navigate(user?.demo ? '/' : '/login');
   };
 
   return (
@@ -62,7 +64,7 @@ export function Sidebar({ className }: { className?: string }) {
               </span>
             </span>
             <span className="text-[11px] text-muted-foreground leading-tight mt-0.5 truncate max-w-[130px]">
-              {currentOrg?.name || 'API Platform'}
+              {user?.demo ? 'DEMO workspace' : currentOrg?.name || 'API Platform'}
             </span>
           </div>
         </div>

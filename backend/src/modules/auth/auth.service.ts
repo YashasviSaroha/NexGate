@@ -1,24 +1,30 @@
+import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { prisma } from '../../config/database.js';
 import { env } from '../../config/env.js';
-import { BadRequestError, UnauthorizedError, NotFoundError } from '../../utils/errors.js';
+import { blacklistJti } from '../../config/redis.js';
+import { BadRequestError, UnauthorizedError, NotFoundError, AppError } from '../../utils/errors.js';
 import { generateRandomToken } from '../../utils/crypto.js';
 
-// Demo fallback data when PostgreSQL is not running locally
-const DEMO_ADMIN = {
-  id: '00000000-0000-0000-0000-000000000001',
-  name: 'NexGate Administrator',
-  email: 'admin@nexgate.dev',
-  password: 'Password123!',
-  orgId: '00000000-0000-0000-0000-000000000002',
-  orgName: 'NexGate Engineering',
-  orgSlug: 'nexgate-demo',
-};
+function databaseUnavailable(err: unknown): boolean {
+  const error = err as { message?: string; code?: string };
+  return error.code === 'P1001' || Boolean(error.message?.includes("Can't reach database server"));
+}
 
 export class AuthService {
-  async register(data: { name: string; email: string; password: string; organizationName?: string }) {
+  async register(data: {
+    name: string;
+    email: string;
+    password: string;
+    organizationName?: string;
+    intent?: 'provider' | 'developer';
+  }) {
     try {
+      if (data.email.toLowerCase() === env.DEMO_USER_EMAIL.toLowerCase()) {
+        throw new BadRequestError('This email is reserved for the public demo.');
+      }
+
       const existing = await prisma.user.findUnique({
         where: { email: data.email },
       });
@@ -56,7 +62,7 @@ export class AuthService {
           data: {
             userId: user.id,
             organizationId: org.id,
-            role: 'OWNER',
+            role: data.intent === 'developer' ? 'DEVELOPER' : 'OWNER',
             status: 'ACTIVE',
           },
         });
@@ -76,14 +82,13 @@ export class AuthService {
           id: result.org.id,
           name: result.org.name,
           slug: result.org.slug,
+          role: data.intent === 'developer' ? 'DEVELOPER' : 'OWNER',
         },
         token,
       };
     } catch (err: any) {
-      if (err.message?.includes("Can't reach database server")) {
-        throw new BadRequestError(
-          'PostgreSQL is not running on localhost:5432. Please start Docker (docker-compose up -d) or use the demo login: admin@nexgate.dev / Password123!'
-        );
+      if (databaseUnavailable(err)) {
+        throw new AppError('Database is unavailable.', 503);
       }
       throw err;
     }
@@ -91,6 +96,10 @@ export class AuthService {
 
   async login(data: { email: string; password: string }) {
     try {
+      if (data.email.toLowerCase() === env.DEMO_USER_EMAIL.toLowerCase()) {
+        throw new UnauthorizedError('Open the public demo from the home page. This account has no password login.');
+      }
+
       const user = await prisma.user.findUnique({
         where: { email: data.email },
         include: {
@@ -128,36 +137,8 @@ export class AuthService {
         token,
       };
     } catch (err: any) {
-      // If PostgreSQL is unreachable, provide seamless demo login for admin@nexgate.dev
-      if (err.message?.includes("Can't reach database server") || err.code === 'P1001') {
-        if (data.email.toLowerCase() === DEMO_ADMIN.email && data.password === DEMO_ADMIN.password) {
-          const token = this.generateToken({
-            id: DEMO_ADMIN.id,
-            email: DEMO_ADMIN.email,
-            name: DEMO_ADMIN.name,
-          });
-
-          return {
-            user: {
-              id: DEMO_ADMIN.id,
-              email: DEMO_ADMIN.email,
-              name: DEMO_ADMIN.name,
-            },
-            organizations: [
-              {
-                id: DEMO_ADMIN.orgId,
-                name: DEMO_ADMIN.orgName,
-                slug: DEMO_ADMIN.orgSlug,
-                role: 'OWNER',
-              },
-            ],
-            token,
-          };
-        }
-
-        throw new BadRequestError(
-          'PostgreSQL is not running on localhost:5432. To sign in without Docker, use demo account: admin@nexgate.dev / Password123!'
-        );
+      if (databaseUnavailable(err)) {
+        throw new AppError('Database is unavailable.', 503);
       }
       throw err;
     }
@@ -194,26 +175,8 @@ export class AuthService {
 
       return user;
     } catch (err: any) {
-      if (err.message?.includes("Can't reach database server") || err.code === 'P1001') {
-        if (userId === DEMO_ADMIN.id) {
-          return {
-            id: DEMO_ADMIN.id,
-            email: DEMO_ADMIN.email,
-            name: DEMO_ADMIN.name,
-            createdAt: new Date(),
-            memberships: [
-              {
-                role: 'OWNER',
-                status: 'ACTIVE',
-                organization: {
-                  id: DEMO_ADMIN.orgId,
-                  name: DEMO_ADMIN.orgName,
-                  slug: DEMO_ADMIN.orgSlug,
-                },
-              },
-            ],
-          };
-        }
+      if (databaseUnavailable(err)) {
+        throw new AppError('Database is unavailable.', 503);
       }
       throw err;
     }
@@ -228,12 +191,11 @@ export class AuthService {
     if (data.name) updateData.name = data.name;
 
     if (data.newPassword) {
-      if (!data.currentPassword) {
-        throw new BadRequestError('Current password is required to set a new password.');
-      }
-      const valid = await bcrypt.compare(data.currentPassword, user.passwordHash);
-      if (!valid) {
-        throw new BadRequestError('Current password does not match.');
+      if (data.currentPassword) {
+        const valid = await bcrypt.compare(data.currentPassword, user.passwordHash);
+        if (!valid) {
+          throw new BadRequestError('Current password does not match.');
+        }
       }
       const salt = await bcrypt.genSalt(12);
       updateData.passwordHash = await bcrypt.hash(data.newPassword, salt);
@@ -268,7 +230,6 @@ export class AuthService {
 
     return {
       message: 'If that email exists, a reset link has been dispatched.',
-      devResetToken: process.env.NODE_ENV !== 'production' ? token : undefined,
     };
   }
 
@@ -301,11 +262,24 @@ export class AuthService {
     return { message: 'Password has been successfully updated.' };
   }
 
-  private generateToken(user: { id: string; email: string; name: string }) {
+  async revokeSession(token: string | undefined): Promise<void> {
+    if (!token) return;
+    const decoded = jwt.decode(token) as { jti?: string; exp?: number } | null;
+    if (!decoded?.jti || !decoded.exp) return;
+    const ttl = decoded.exp - Math.floor(Date.now() / 1000);
+    if (ttl > 0) await blacklistJti(decoded.jti, ttl);
+  }
+
+  issueDemoToken(user: { id: string; email: string; name: string }) {
+    return this.generateToken(user, true);
+  }
+
+  private generateToken(user: { id: string; email: string; name: string }, demo = false) {
+    const isDemo = demo || user.email.toLowerCase() === env.DEMO_USER_EMAIL.toLowerCase();
     return jwt.sign(
-      { id: user.id, email: user.email, name: user.name },
+      { id: user.id, email: user.email, name: user.name, demo: isDemo },
       env.JWT_SECRET,
-      { expiresIn: env.JWT_EXPIRY as any }
+      { expiresIn: env.JWT_EXPIRY as any, jwtid: crypto.randomUUID() }
     );
   }
 }

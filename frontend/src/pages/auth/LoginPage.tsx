@@ -57,14 +57,24 @@ export function LoginPage() {
               required
             />
 
-            <Input
-              label="Password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              required
-            />
+            <div>
+              <Input
+                label="Password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                required
+              />
+              <div className="flex justify-end mt-1.5">
+                <Link
+                  to="/forgot-password"
+                  className="text-xs font-medium text-muted-foreground hover:text-primary transition-colors"
+                >
+                  Forget Password?
+                </Link>
+              </div>
+            </div>
 
             <Button type="submit" className="w-full" isLoading={isLoading}>
               <span>Sign in</span>
@@ -74,16 +84,21 @@ export function LoginPage() {
 
           <div className="pt-2 text-center text-xs text-muted-foreground">
             Don't have an account?{' '}
-            <Link to="/register" className="font-semibold text-primary hover:underline">
+            <Link to="/auth/register" className="font-semibold text-primary hover:underline">
               Create an account
             </Link>
           </div>
         </div>
 
-        {/* Demo credentials hint */}
-        <div className="p-3 rounded-lg bg-muted/40 border border-border text-center text-xs text-muted-foreground">
-          Demo Admin: <span className="font-mono text-foreground font-semibold">admin@nexgate.dev</span> / <span className="font-mono text-foreground font-semibold">Password123!</span>
-        </div>
+        <p className="text-center text-xs text-muted-foreground">
+          <Link to="/" className="font-semibold text-primary hover:underline">
+            Home
+          </Link>
+          {' · '}
+          <Link to="/demo" className="font-semibold text-primary hover:underline">
+            Instant Demo
+          </Link>
+        </p>
       </div>
     </div>
   );

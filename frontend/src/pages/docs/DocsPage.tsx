@@ -1,10 +1,10 @@
-import React, { useEffect, useState } from 'react';
-import { BookOpen, Copy, Check, ExternalLink, Code } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext.js';
 import { apiClient } from '../../api/client.js';
-import { Card, CardTitle, CardDescription } from '../../components/ui/Card.js';
+import { Card, CardTitle } from '../../components/ui/Card.js';
 import { Badge } from '../../components/ui/Badge.js';
-import { Button } from '../../components/ui/Button.js';
+
+const gatewayOrigin = (import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000').replace(/\/$/, '');
 
 export function DocsPage() {
   const { currentOrg } = useAuth();
@@ -69,44 +69,46 @@ export function DocsPage() {
                 </div>
 
                 <div className="p-3 rounded-lg bg-muted/40 border border-border text-xs space-y-2">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-3">
                     <span className="text-muted-foreground font-semibold">Gateway Base URL:</span>
-                    <span className="font-mono text-primary font-bold">
-                      http://localhost:3000/gateway/{selectedApi.slug}/v1
+                    <span className="font-mono text-primary font-bold break-all text-right">
+                      {gatewayOrigin}/gateway/{selectedApi.slug}/{selectedApi.versions?.[0]?.version || 'v1'}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground font-semibold">Authentication Header:</span>
-                    <span className="font-mono text-foreground">X-API-Key: ng_live_xxxx...</span>
+                    <span className="font-mono text-foreground">X-API-Key: YOUR_API_KEY</span>
                   </div>
                 </div>
               </Card>
 
-              {/* Endpoints Reference */}
               <Card className="p-6 space-y-4">
                 <CardTitle className="text-base font-bold">Exposed Endpoints</CardTitle>
                 <div className="space-y-3">
-                  <div className="p-4 rounded-lg border border-border bg-card space-y-2">
-                    <div className="flex items-center gap-2">
-                      <span className="px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-blue-500/10 text-blue-500">
-                        GET
-                      </span>
-                      <span className="font-mono text-xs font-bold text-foreground">/current</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      Retrieve real-time atmospheric measurements and temperature for a target city.
-                    </p>
-
-                    <div className="pt-2">
-                      <span className="text-[11px] font-semibold text-muted-foreground uppercase">
-                        Sample cURL Request
-                      </span>
-                      <pre className="mt-1 p-2.5 rounded bg-muted/40 border border-border font-mono text-[11px] text-foreground overflow-x-auto">
-{`curl -X GET "http://localhost:3000/gateway/${selectedApi.slug}/v1/current?city=San%20Francisco" \\
-  -H "X-API-Key: your_api_key_here"`}
-                      </pre>
-                    </div>
-                  </div>
+                  {(selectedApi.endpoints || []).length === 0 && (
+                    <p className="text-xs text-muted-foreground">This API has no endpoints yet.</p>
+                  )}
+                  {(selectedApi.endpoints || []).map((endpoint: any) => {
+                    const version = selectedApi.versions?.[0]?.version || 'v1';
+                    const path = String(endpoint.path || '/').replace(/^\//, '');
+                    return (
+                      <div key={endpoint.id} className="p-4 rounded-lg border border-border bg-card space-y-2">
+                        <div className="flex items-center gap-2">
+                          <span className="px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-blue-500/10 text-blue-500">
+                            {endpoint.method}
+                          </span>
+                          <span className="font-mono text-xs font-bold text-foreground">{endpoint.path}</span>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          {endpoint.description || 'No description saved for this endpoint.'}
+                        </p>
+                        <pre className="mt-1 p-2.5 rounded bg-muted/40 border border-border font-mono text-[11px] text-foreground overflow-x-auto">
+{`curl -X ${endpoint.method} "${gatewayOrigin}/gateway/${selectedApi.slug}/${version}/${path}" \\
+  -H "X-API-Key: YOUR_API_KEY"`}
+                        </pre>
+                      </div>
+                    );
+                  })}
                 </div>
               </Card>
             </>

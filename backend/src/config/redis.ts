@@ -55,7 +55,7 @@ redis.call('ZREMRANGEBYSCORE', key, 0, clearBefore)
 local currentRequests = redis.call('ZCARD', key)
 
 if currentRequests < limit then
-    redis.call('ZADD', key, now, now)
+    redis.call('ZADD', key, now, ARGV[4])
     redis.call('EXPIRE', key, window)
     return {1, limit - currentRequests - 1, window}
 else
@@ -90,7 +90,8 @@ export async function checkRateLimit(
         `ratelimit:${key}`,
         windowSeconds,
         limit,
-        now
+        now,
+        `${now}-${Math.random().toString(36).slice(2)}`
       )) as [number, number, number];
 
       return {
@@ -135,6 +136,17 @@ export async function checkRateLimit(
     resetSeconds: Math.max(1, entry.expireAt - nowSec),
     limit,
   };
+}
+
+export async function blacklistJti(jti: string, ttlSeconds: number): Promise<void> {
+  if (!redisClient || !isConnected || ttlSeconds <= 0) return;
+  await redisClient.set(`jwt:revoked:${jti}`, '1', 'EX', ttlSeconds);
+}
+
+export async function isJtiBlacklisted(jti: string): Promise<boolean> {
+  if (!redisClient || !isConnected) return false;
+  const value = await redisClient.get(`jwt:revoked:${jti}`);
+  return value === '1';
 }
 
 export { redisClient };

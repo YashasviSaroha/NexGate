@@ -11,6 +11,7 @@ export function RegisterPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [organizationName, setOrganizationName] = useState('');
+  const [intent, setIntent] = useState<'provider' | 'developer'>('provider');
   const [isLoading, setIsLoading] = useState(false);
 
   const { register } = useAuth();
@@ -21,9 +22,9 @@ export function RegisterPage() {
     e.preventDefault();
     setIsLoading(true);
     try {
-      await register({ name, email, password, organizationName });
+      await register({ name, email, password, organizationName, intent });
       success('Account created', 'Welcome to NexGate!');
-      navigate('/');
+      navigate(intent === 'developer' ? '/apps' : '/apis');
     } catch (err: any) {
       error('Registration Failed', err.response?.data?.error?.message || 'Error creating account');
     } finally {
@@ -46,6 +47,27 @@ export function RegisterPage() {
 
         <div className="rounded-xl border border-border bg-card p-6 shadow-xl space-y-4">
           <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setIntent('provider')}
+                className={`rounded-lg border px-3 py-2 text-xs font-semibold ${
+                  intent === 'provider' ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground'
+                }`}
+              >
+                Publish APIs
+              </button>
+              <button
+                type="button"
+                onClick={() => setIntent('developer')}
+                className={`rounded-lg border px-3 py-2 text-xs font-semibold ${
+                  intent === 'developer' ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground'
+                }`}
+              >
+                Consume APIs
+              </button>
+            </div>
+
             <Input
               label="Full Name"
               type="text"

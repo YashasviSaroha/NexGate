@@ -10,6 +10,9 @@ import { AppShell } from './components/layout/AppShell.js';
 // Pages
 import { LoginPage } from './pages/auth/LoginPage.js';
 import { RegisterPage } from './pages/auth/RegisterPage.js';
+import { ForgotPasswordPage } from './pages/auth/ForgotPasswordPage.js';
+import { DemoEntryPage } from './pages/auth/DemoEntryPage.js';
+import { LandingPage } from './pages/landing/LandingPage.js';
 import { DashboardPage } from './pages/dashboard/DashboardPage.js';
 import { ApisPage } from './pages/apis/ApisPage.js';
 import { AppsPage } from './pages/apps/AppsPage.js';
@@ -20,6 +23,7 @@ import { DocsPage } from './pages/docs/DocsPage.js';
 import { SubscriptionsPage } from './pages/subscriptions/SubscriptionsPage.js';
 import { WebhooksPage } from './pages/webhooks/WebhooksPage.js';
 import { SettingsPage } from './pages/settings/SettingsPage.js';
+import { AssistantPage } from './pages/assistant/AssistantPage.js';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
@@ -33,10 +37,30 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   }
 
   if (!user) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/" replace />;
   }
 
   return <AppShell>{children}</AppShell>;
+}
+
+function HomeRoute() {
+  const { user, isLoading } = useAuth();
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen w-full flex items-center justify-center bg-background text-primary">
+        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!user) return <LandingPage />;
+
+  return (
+    <AppShell>
+      <DashboardPage />
+    </AppShell>
+  );
 }
 
 export function App() {
@@ -48,17 +72,12 @@ export function App() {
             <Routes>
               {/* Public Auth Routes */}
               <Route path="/login" element={<LoginPage />} />
-              <Route path="/register" element={<RegisterPage />} />
+              <Route path="/auth/register" element={<RegisterPage />} />
+              <Route path="/register" element={<Navigate to="/auth/register" replace />} />
+              <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+              <Route path="/demo" element={<DemoEntryPage />} />
 
-              {/* Protected Management & Gateway Portal Routes */}
-              <Route
-                path="/"
-                element={
-                  <ProtectedRoute>
-                    <DashboardPage />
-                  </ProtectedRoute>
-                }
-              />
+              <Route path="/" element={<HomeRoute />} />
               <Route
                 path="/apis"
                 element={
@@ -128,6 +147,14 @@ export function App() {
                 element={
                   <ProtectedRoute>
                     <WebhooksPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/assistant"
+                element={
+                  <ProtectedRoute>
+                    <AssistantPage />
                   </ProtectedRoute>
                 }
               />

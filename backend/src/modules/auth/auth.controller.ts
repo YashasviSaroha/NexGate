@@ -1,13 +1,16 @@
 import { Request, Response, NextFunction } from 'express';
 import { authService } from './auth.service.js';
+import { ensureDemoWorkspace } from '../demo/demo.service.js';
 
 const COOKIE_NAME = 'nexgate_token';
+
+const production = process.env.NODE_ENV === 'production';
 
 function setAuthCookie(res: Response, token: string): void {
   res.cookie(COOKIE_NAME, token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
+    secure: production,
+    sameSite: production ? 'none' : 'lax',
     path: '/',
     maxAge: 24 * 60 * 60 * 1000, // 24 hours
   });
@@ -16,8 +19,8 @@ function setAuthCookie(res: Response, token: string): void {
 function clearAuthCookie(res: Response): void {
   res.clearCookie(COOKIE_NAME, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
+    secure: production,
+    sameSite: production ? 'none' : 'lax',
     path: '/',
   });
 }
@@ -32,7 +35,6 @@ export class AuthController {
         data: {
           user: result.user,
           organization: result.organization,
-          token: result.token,
         },
       });
     } catch (err) {
@@ -49,7 +51,6 @@ export class AuthController {
         data: {
           user: result.user,
           organizations: result.organizations,
-          token: result.token,
         },
       });
     } catch (err) {
@@ -59,10 +60,32 @@ export class AuthController {
 
   async logout(req: Request, res: Response, next: NextFunction) {
     try {
+      const bearer = req.headers.authorization?.startsWith('Bearer ')
+        ? req.headers.authorization.split(' ')[1]
+        : undefined;
+      await authService.revokeSession(req.cookies?.nexgate_token || bearer);
       clearAuthCookie(res);
       res.json({
         success: true,
         data: { message: 'Logged out successfully' },
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async demo(req: Request, res: Response, next: NextFunction) {
+    try {
+      const workspace = await ensureDemoWorkspace();
+      const token = authService.issueDemoToken(workspace.user);
+      setAuthCookie(res, token);
+      res.json({
+        success: true,
+        data: {
+          user: { ...workspace.user, demo: true },
+          organizations: [workspace.organization],
+          sandboxKey: workspace.sandboxKey,
+        },
       });
     } catch (err) {
       next(err);
@@ -74,7 +97,7 @@ export class AuthController {
       const user = await authService.getMe(req.user!.id);
       res.json({
         success: true,
-        data: user,
+        data: { ...user, demo: req.user?.demo === true },
       });
     } catch (err) {
       next(err);

@@ -5,6 +5,7 @@ export interface User {
   id: string;
   name: string;
   email: string;
+  demo?: boolean;
 }
 
 export interface OrgSummary {
@@ -21,6 +22,7 @@ interface AuthContextType {
   isLoading: boolean;
   login: (data: any) => Promise<void>;
   register: (data: any) => Promise<void>;
+  startDemo: () => Promise<void>;
   logout: () => Promise<void>;
   switchOrg: (org: OrgSummary) => void;
   refreshUser: () => Promise<void>;
@@ -39,7 +41,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const res = await apiClient.get('/api/v1/auth/me');
       if (res.data?.success && res.data.data) {
         const u = res.data.data;
-        setUser({ id: u.id, name: u.name, email: u.email });
+        setUser({ id: u.id, name: u.name, email: u.email, demo: u.demo === true });
 
         const orgs = (u.memberships || []).map((m: any) => ({
           id: m.organization.id,
@@ -71,7 +73,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = async (credentials: any) => {
     const res = await apiClient.post('/api/v1/auth/login', credentials);
     if (res.data?.success) {
-      setUser(res.data.data.user);
+      setUser({ ...res.data.data.user, demo: false });
       const orgs = res.data.data.organizations || [];
       setOrganizations(orgs);
       if (orgs.length > 0) {
@@ -84,7 +86,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const register = async (data: any) => {
     const res = await apiClient.post('/api/v1/auth/register', data);
     if (res.data?.success) {
-      setUser(res.data.data.user);
+      setUser({ ...res.data.data.user, demo: false });
       if (res.data.data.organization) {
         const org = res.data.data.organization;
         setOrganizations([org]);
@@ -94,6 +96,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const startDemo = useCallback(async () => {
+    const res = await apiClient.post('/api/v1/auth/demo');
+    if (res.data?.success) {
+      setUser({ ...res.data.data.user, demo: true });
+      const orgs = res.data.data.organizations || [];
+      setOrganizations(orgs);
+      if (orgs.length > 0) {
+        setCurrentOrg(orgs[0]);
+        localStorage.setItem('nexgate-org-id', orgs[0].id);
+      }
+      if (res.data.data.sandboxKey) {
+        sessionStorage.setItem('nexgate-sandbox-key', res.data.data.sandboxKey);
+      }
+    }
+  }, []);
+
   const logout = async () => {
     try {
       await apiClient.post('/api/v1/auth/logout');
@@ -102,6 +120,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setOrganizations([]);
       setCurrentOrg(null);
       localStorage.removeItem('nexgate-org-id');
+      sessionStorage.removeItem('nexgate-sandbox-key');
     }
   };
 
@@ -119,6 +138,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isLoading,
         login,
         register,
+        startDemo,
         logout,
         switchOrg,
         refreshUser,

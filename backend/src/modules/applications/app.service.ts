@@ -3,40 +3,9 @@ import { generateApiKey } from '../../utils/crypto.js';
 import { BadRequestError, NotFoundError } from '../../utils/errors.js';
 import { AppStatus, KeyEnvironment } from '@prisma/client';
 
-const DEMO_APPS = [
-  {
-    id: '00000000-0000-0000-0000-000000000020',
-    organizationId: '00000000-0000-0000-0000-000000000002',
-    name: 'Mobile Weather App',
-    description: 'iOS and Android client consumer app.',
-    status: 'ACTIVE',
-    createdAt: new Date(),
-    apiKeys: [
-      {
-        id: '00000000-0000-0000-0000-000000000030',
-        keyPrefix: 'ng_live_a1b2c3d4',
-        environment: 'LIVE',
-        status: 'ACTIVE',
-        lastUsedAt: new Date(),
-        createdAt: new Date(),
-      },
-    ],
-    subscriptions: [
-      {
-        id: '00000000-0000-0000-0000-000000000040',
-        api: { id: '00000000-0000-0000-0000-000000000010', name: 'Global Weather API', slug: 'weather-api' },
-        apiPlan: { id: 'plan_1', name: 'Starter Plan', tier: 'FREE', requestsPerMinute: 60 },
-        status: 'ACTIVE',
-      },
-    ],
-    _count: { requestLogs: 12 },
-  },
-];
-
 export class AppService {
   async listApps(orgId: string) {
-    try {
-      return await prisma.application.findMany({
+    return prisma.application.findMany({
         where: { organizationId: orgId, status: { not: 'DELETED' } },
         include: {
           apiKeys: {
@@ -62,12 +31,6 @@ export class AppService {
         },
         orderBy: { createdAt: 'desc' },
       });
-    } catch (err: any) {
-      if (err.message?.includes("Can't reach database server") || err.code === 'P1001') {
-        return DEMO_APPS as any;
-      }
-      throw err;
-    }
   }
 
   async getAppById(orgId: string, appId: string) {
@@ -236,8 +199,10 @@ export class AppService {
     const app = await prisma.application.findFirst({ where: { id: appId, organizationId: orgId } });
     if (!app) throw new NotFoundError('Application not found.');
 
-    const api = await prisma.api.findUnique({ where: { id: data.apiId } });
-    if (!api) throw new NotFoundError('API not found.');
+    const api = await prisma.api.findFirst({
+      where: { id: data.apiId, organizationId: orgId },
+    });
+    if (!api) throw new NotFoundError('API not found in this organization.');
 
     const plan = await prisma.apiPlan.findFirst({
       where: { id: data.apiPlanId, apiId: data.apiId },

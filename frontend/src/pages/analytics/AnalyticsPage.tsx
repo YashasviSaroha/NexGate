@@ -29,7 +29,7 @@ import { KpiCard } from '../../components/shared/KpiCard.js';
 import { formatNumber, formatLatency, formatDate } from '../../lib/formatters.js';
 
 export function AnalyticsPage() {
-  const { currentOrg } = useAuth();
+  const { currentOrg, user } = useAuth();
   const { resolvedTheme } = useTheme();
 
   const [timeRange, setTimeRange] = useState('24');
@@ -79,7 +79,9 @@ export function AnalyticsPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-foreground">Traffic & Performance Analytics</h1>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Deep dive into gateway throughput, latency percentiles, and error categorizations.
+            {user?.demo
+              ? 'Includes labeled sample history. Live playground calls are stored separately and can be cleared from the demo session.'
+              : 'Deep dive into gateway throughput, latency percentiles, and error categorizations.'}
           </p>
         </div>
 

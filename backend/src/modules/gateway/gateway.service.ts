@@ -1,10 +1,10 @@
 import http from 'http';
 import https from 'https';
-import { URL } from 'url';
 import { prisma } from '../../config/database.js';
+import { env } from '../../config/env.js';
 import { checkRateLimit } from '../../config/redis.js';
 import { hashApiKey } from '../../utils/crypto.js';
-import { validateUpstreamUrl } from '../../utils/ssrf.js';
+import { validateUpstreamUrl, type UpstreamTarget } from '../../utils/ssrf.js';
 import {
   UnauthorizedError,
   ForbiddenError,
@@ -59,56 +59,22 @@ export class GatewayService {
 
     // 2. Validate API Key in Database
     const keyHash = hashApiKey(rawKey);
-    let keyRecord: any;
-
-    try {
-      keyRecord = await prisma.apiKey.findUnique({
-        where: { keyHash },
-        include: {
-          application: {
-            include: {
-              organization: true,
-              subscriptions: {
-                include: {
-                  api: true,
-                  apiPlan: true,
-                },
+    const keyRecord = await prisma.apiKey.findUnique({
+      where: { keyHash },
+      include: {
+        application: {
+          include: {
+            organization: true,
+            subscriptions: {
+              include: {
+                api: true,
+                apiPlan: true,
               },
             },
           },
         },
-      });
-    } catch (err: any) {
-      if (err.message?.includes("Can't reach database server") || err.code === 'P1001') {
-        // Fallback for demo key when PostgreSQL is not running
-        if (rawKey === 'ng_live_a1b2c3d4_0123456789abcdef0123456789abcdef0123456789abcdef') {
-          keyRecord = {
-            id: '00000000-0000-0000-0000-000000000030',
-            status: 'ACTIVE',
-            application: {
-              id: '00000000-0000-0000-0000-000000000020',
-              name: 'Mobile Weather App',
-              status: 'ACTIVE',
-              organizationId: '00000000-0000-0000-0000-000000000002',
-              subscriptions: [
-                {
-                  apiId: '00000000-0000-0000-0000-000000000010',
-                  status: 'ACTIVE',
-                  apiPlan: {
-                    requestsPerMinute: 60,
-                    dailyQuota: 1000,
-                  },
-                },
-              ],
-            },
-          };
-        } else {
-          throw new UnauthorizedError('Invalid API Key.');
-        }
-      } else {
-        throw err;
-      }
-    }
+      },
+    });
 
     if (!keyRecord) {
       throw new UnauthorizedError('Invalid API Key.');
@@ -128,37 +94,15 @@ export class GatewayService {
     }
 
     // 3. Resolve Target API & Version
-    let targetApi: any;
-    try {
-      targetApi = await prisma.api.findUnique({
-        where: { slug: params.apiSlug },
-        include: {
-          versions: {
-            where: { version: params.version },
-            include: { endpoints: true },
-          },
+    const targetApi = await prisma.api.findUnique({
+      where: { slug: params.apiSlug },
+      include: {
+        versions: {
+          where: { version: params.version },
+          include: { endpoints: true },
         },
-      });
-    } catch (err: any) {
-      if (err.message?.includes("Can't reach database server") || err.code === 'P1001') {
-        if (params.apiSlug === 'weather-api') {
-          targetApi = {
-            id: '00000000-0000-0000-0000-000000000010',
-            name: 'Global Weather API',
-            slug: 'weather-api',
-            status: 'ACTIVE',
-            upstreamBaseUrl: 'http://localhost:3000/mock-upstream/weather',
-            versions: [
-              {
-                id: 'v1_id',
-                version: 'v1',
-                endpoints: [],
-              },
-            ],
-          };
-        }
-      }
-    }
+      },
+    });
 
     if (!targetApi) {
       throw new NotFoundError(`API with slug '${params.apiSlug}' not found.`);
@@ -185,6 +129,10 @@ export class GatewayService {
     }
 
     const plan = subscription.apiPlan;
+
+    if (!scopeAllows(keyRecord.scopes, params.method, params.subPath)) {
+      throw new ForbiddenError('This API key is not allowed to call that endpoint.');
+    }
 
     // 5. Distributed Rate Limiting (Requests Per Minute)
     const rateLimitKey = `rl:app:${application.id}:api:${targetApi.id}`;
@@ -232,8 +180,32 @@ export class GatewayService {
       });
 
       throw new RateLimitError(
-        `Daily quota of ${plan.dailyQuota} requests reached. Resets at midnight UTC.`,
+        `Daily quota of ${plan.dailyQuota} requests reached for this UTC date.`,
         dailyQuotaResult.resetSeconds
+      );
+    }
+
+    const monthKey = `quota:monthly:${application.id}:${new Date().toISOString().slice(0, 7)}`;
+    const monthlyQuotaResult = await checkRateLimit(monthKey, plan.monthlyQuota, 32 * 24 * 60 * 60);
+
+    if (!monthlyQuotaResult.allowed) {
+      this.recordLogAsync({
+        organizationId: application.organizationId,
+        applicationId: application.id,
+        apiId: targetApi.id,
+        apiVersionId: targetVersion.id,
+        method: params.method,
+        path: `/gateway/${params.apiSlug}/${params.version}/${params.subPath}`,
+        statusCode: 429,
+        latencyMs: Date.now() - startTime,
+        errorCategory: 'MONTHLY_QUOTA_EXCEEDED',
+        requestId,
+        ipAddress: params.clientIp,
+      });
+
+      throw new RateLimitError(
+        `Monthly quota of ${plan.monthlyQuota} requests reached.`,
+        monthlyQuotaResult.resetSeconds
       );
     }
 
@@ -254,8 +226,8 @@ export class GatewayService {
     }
 
     // 8. Forward to Upstream
-    const upstreamUrlObj = await validateUpstreamUrl(targetApi.upstreamBaseUrl);
-    const forwardResult = await this.forwardUpstreamRequest(upstreamUrlObj, params);
+    const upstream = await validateUpstreamUrl(targetApi.upstreamBaseUrl);
+    const forwardResult = await this.forwardUpstreamRequest(upstream, params);
     const totalLatency = Date.now() - startTime;
 
     // 9. Asynchronously record request log & update API key lastUsedAt
@@ -308,48 +280,64 @@ export class GatewayService {
   }
 
   private forwardUpstreamRequest(
-    upstreamUrl: URL,
+    upstream: UpstreamTarget,
     params: GatewayForwardParams
   ): Promise<{ statusCode: number; headers: Record<string, string | string[]>; body: Buffer }> {
     return new Promise((resolve, reject) => {
-      // Build upstream request URL
+      const upstreamUrl = upstream.url;
       const targetPath = `${upstreamUrl.pathname.replace(/\/$/, '')}/${params.subPath.replace(/^\//, '')}`;
       const searchParams = new URLSearchParams(params.query as Record<string, string>).toString();
       const fullPath = searchParams ? `${targetPath}?${searchParams}` : targetPath;
 
       const client = upstreamUrl.protocol === 'https:' ? https : http;
-
-      // Filter and sanitize headers to prevent spoofing
-      const safeHeaders: Record<string, string | string[] | undefined> = {
-        ...params.headers,
+      const payload = encodeUpstreamBody(params.method, params.body);
+      const safeHeaders = buildForwardHeaders(params.headers, {
         host: upstreamUrl.host,
-        'x-forwarded-for': params.clientIp || '127.0.0.1',
-        'x-forwarded-proto': upstreamUrl.protocol.replace(':', ''),
-      };
+        clientIp: params.clientIp,
+        proto: upstreamUrl.protocol.replace(':', ''),
+        contentLength: payload ? payload.length : undefined,
+      });
 
-      // Strip proxy / auth credentials from upstream forwarding
-      delete safeHeaders['x-api-key'];
-      delete safeHeaders['authorization'];
-      delete safeHeaders['connection'];
+      let settled = false;
+      const fail = (error: Error) => {
+        if (settled) return;
+        settled = true;
+        reject(error);
+      };
 
       const req = client.request(
         {
-          hostname: upstreamUrl.hostname,
+          host: upstream.pinnedAddress,
+          servername: upstream.hostname,
           port: upstreamUrl.port || (upstreamUrl.protocol === 'https:' ? 443 : 80),
           path: fullPath,
           method: params.method,
-          headers: safeHeaders as http.OutgoingHttpHeaders,
-          timeout: 30000, // 30 sec upstream timeout
+          headers: safeHeaders,
+          timeout: env.GATEWAY_REQUEST_TIMEOUT_MS,
+          lookup: (_hostname, options, callback) => {
+            const done = typeof options === 'function' ? options : callback;
+            done(null, upstream.pinnedAddress, upstream.family);
+          },
         },
         (res) => {
           const chunks: Buffer[] = [];
-          res.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+          let received = 0;
+          res.on('data', (chunk: Buffer) => {
+            received += chunk.length;
+            if (received > MAX_UPSTREAM_RESPONSE_BYTES) {
+              req.destroy();
+              fail(new AppError('Upstream response exceeded the 5 MB size limit.', 502));
+              return;
+            }
+            chunks.push(Buffer.from(chunk));
+          });
           res.on('end', () => {
-            const body = Buffer.concat(chunks);
+            if (settled) return;
+            settled = true;
             resolve({
               statusCode: res.statusCode || 200,
               headers: res.headers as Record<string, string | string[]>,
-              body,
+              body: Buffer.concat(chunks),
             });
           });
         }
@@ -357,18 +345,14 @@ export class GatewayService {
 
       req.on('timeout', () => {
         req.destroy();
-        reject(new AppError('Upstream Gateway Timeout (504)', 504));
+        fail(new AppError('Upstream Gateway Timeout (504)', 504));
       });
 
       req.on('error', (err) => {
-        reject(new AppError(`Bad Gateway: Upstream connection failed (${err.message})`, 502));
+        fail(new AppError(`Bad Gateway: Upstream connection failed (${err.message})`, 502));
       });
 
-      if (params.body && ['POST', 'PUT', 'PATCH'].includes(params.method.toUpperCase())) {
-        const bodyData = typeof params.body === 'object' ? JSON.stringify(params.body) : params.body;
-        req.write(bodyData);
-      }
-
+      if (payload) req.write(payload);
       req.end();
     });
   }
@@ -402,6 +386,38 @@ export class GatewayService {
           ipAddress: data.ipAddress,
         },
       });
+
+      if (data.applicationId && data.apiId) {
+        const periodStart = new Date();
+        periodStart.setUTCMinutes(0, 0, 0);
+        const success = data.statusCode < 400;
+        await prisma.usageRecord.upsert({
+          where: {
+            applicationId_apiId_period_periodStart: {
+              applicationId: data.applicationId,
+              apiId: data.apiId,
+              period: 'HOUR',
+              periodStart,
+            },
+          },
+          create: {
+            organizationId: data.organizationId,
+            applicationId: data.applicationId,
+            apiId: data.apiId,
+            period: 'HOUR',
+            periodStart,
+            requestCount: 1,
+            successCount: success ? 1 : 0,
+            failureCount: success ? 0 : 1,
+            avgLatencyMs: data.latencyMs,
+          },
+          update: {
+            requestCount: { increment: 1 },
+            successCount: { increment: success ? 1 : 0 },
+            failureCount: { increment: success ? 0 : 1 },
+          },
+        });
+      }
     } catch (e) {
       // Async log failure should never disrupt the client response
       console.error('Failed to write gateway request log:', e);
@@ -410,3 +426,72 @@ export class GatewayService {
 }
 
 export const gatewayService = new GatewayService();
+
+const HOP_BY_HOP = new Set([
+  'connection',
+  'keep-alive',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'te',
+  'trailer',
+  'trailers',
+  'transfer-encoding',
+  'upgrade',
+  'cookie',
+  'set-cookie',
+  'host',
+  'content-length',
+  'x-api-key',
+  'authorization',
+]);
+
+const MAX_UPSTREAM_RESPONSE_BYTES = 5 * 1024 * 1024;
+
+export function buildForwardHeaders(
+  incoming: http.IncomingHttpHeaders,
+  options: { host: string; clientIp?: string; proto: string; contentLength?: number }
+): http.OutgoingHttpHeaders {
+  const safe: http.OutgoingHttpHeaders = {};
+  for (const [key, value] of Object.entries(incoming)) {
+    if (value === undefined || HOP_BY_HOP.has(key.toLowerCase())) continue;
+    safe[key] = value;
+  }
+  safe.host = options.host;
+  safe['x-forwarded-for'] = options.clientIp || 'unknown';
+  safe['x-forwarded-proto'] = options.proto;
+  if (options.contentLength !== undefined) {
+    safe['content-length'] = String(options.contentLength);
+  }
+  return safe;
+}
+
+export function encodeUpstreamBody(method: string, body: unknown): Buffer | undefined {
+  if (!body || !['POST', 'PUT', 'PATCH'].includes(method.toUpperCase())) return undefined;
+  const raw = typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body);
+  return Buffer.isBuffer(raw) ? raw : Buffer.from(raw);
+}
+
+export function scopeAllows(scopes: unknown, method: string, subPath: string): boolean {
+  if (!Array.isArray(scopes) || scopes.length === 0) return true;
+  const path = `/${subPath.replace(/^\/|\/$/g, '')}`;
+  const verb = method.toUpperCase();
+  return scopes.some((entry) => {
+    if (typeof entry !== 'string' || entry.trim() === '') return false;
+    const parts = entry.trim().split(/\s+/);
+    const allowedMethod = parts.length > 1 ? parts[0].toUpperCase() : '*';
+    const allowedPath = parts.length > 1 ? parts[1] : parts[0];
+    const methodOk = allowedMethod === '*' || allowedMethod === verb;
+    const pathOk = allowedPath === '*' || allowedPath === path || allowedPath === subPath;
+    return methodOk && pathOk;
+  });
+}
+
+export const STRIPPED_RESPONSE_HEADERS = [
+  'transfer-encoding',
+  'connection',
+  'keep-alive',
+  'proxy-authenticate',
+  'trailer',
+  'upgrade',
+  'set-cookie',
+];

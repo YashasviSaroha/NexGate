@@ -1,24 +1,53 @@
 import dns from 'dns/promises';
+import net from 'net';
 import { URL } from 'url';
 import { BadRequestError } from './errors.js';
 
-// Blocked IP ranges: loopback, link-local, private networks, cloud metadata
 const BLOCKED_IP_PATTERNS = [
-  /^127\./,                         // Loopback IPv4
-  /^0\./,                           // Current network
-  /^10\./,                          // Private class A
-  /^172\.(1[6-9]|2[0-9]|3[0-1])\./, // Private class B
-  /^192\.168\./,                    // Private class C
-  /^169\.254\./,                    // Link-local / AWS / GCP / Azure metadata
-  /^::1$/,                          // Loopback IPv6
-  /^fc00:/i,                        // IPv6 Unique local address
-  /^fe80:/i,                        // IPv6 Link-local
+  /^127\./,
+  /^0\./,
+  /^10\./,
+  /^172\.(1[6-9]|2[0-9]|3[0-1])\./,
+  /^192\.168\./,
+  /^169\.254\./,
+  /^::1$/,
+  /^fc[0-9a-f]{2}:/i,
+  /^fd[0-9a-f]{2}:/i,
+  /^fe80:/i,
 ];
+
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
+
+export interface UpstreamTarget {
+  url: URL;
+  hostname: string;
+  pinnedAddress: string;
+  family: 4 | 6;
+}
+
+function allowLocalUpstream(explicit?: boolean): boolean {
+  if (typeof explicit === 'boolean') return explicit;
+  return process.env.ALLOW_LOCAL_UPSTREAM === 'true';
+}
+
+function unwrapMappedIpv4(address: string): string {
+  const mapped = address.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i);
+  return mapped ? mapped[1] : address;
+}
+
+export function isBlockedAddress(address: string): boolean {
+  const normalized = unwrapMappedIpv4(address.trim().toLowerCase());
+  return BLOCKED_IP_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+function familyOf(address: string): 4 | 6 {
+  return net.isIP(unwrapMappedIpv4(address)) === 6 ? 6 : 4;
+}
 
 export async function validateUpstreamUrl(
   urlString: string,
-  allowLocalhostInDev = process.env.NODE_ENV !== 'production'
-): Promise<URL> {
+  allowLocalhost?: boolean
+): Promise<UpstreamTarget> {
   let parsed: URL;
   try {
     parsed = new URL(urlString);
@@ -30,33 +59,57 @@ export async function validateUpstreamUrl(
     throw new BadRequestError('Upstream protocol must be HTTP or HTTPS.');
   }
 
-  const hostname = parsed.hostname.toLowerCase();
+  const hostname = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  const permitLoopback = allowLocalUpstream(allowLocalhost);
 
-  // In dev/test, we may allow explicit localhost testing
-  if (allowLocalhostInDev && (hostname === 'localhost' || hostname === '127.0.0.1')) {
-    return parsed;
+  if (LOOPBACK_HOSTS.has(hostname)) {
+    if (!permitLoopback) {
+      throw new BadRequestError('Access to loopback address is not allowed.');
+    }
+    const pinnedAddress = hostname === '::1' ? '::1' : '127.0.0.1';
+    return {
+      url: parsed,
+      hostname,
+      pinnedAddress,
+      family: hostname === '::1' ? 6 : 4,
+    };
   }
 
-  if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
-    throw new BadRequestError('Access to loopback address is not allowed.');
+  const literal = net.isIP(hostname);
+  if (literal !== 0) {
+    if (isBlockedAddress(hostname)) {
+      throw new BadRequestError(`Upstream host resolves to restricted IP range (${hostname}).`);
+    }
+    return {
+      url: parsed,
+      hostname,
+      pinnedAddress: hostname,
+      family: literal === 6 ? 6 : 4,
+    };
   }
 
-  // Resolve hostname to IP to protect against DNS rebinding and private subnet routing
+  let records: { address: string; family: number }[];
   try {
-    const addresses = await dns.lookup(hostname, { all: true });
-    for (const record of addresses) {
-      for (const pattern of BLOCKED_IP_PATTERNS) {
-        if (pattern.test(record.address)) {
-          throw new BadRequestError(`Upstream host resolves to restricted IP range (${record.address}).`);
-        }
-      }
-    }
-  } catch (err: unknown) {
-    if (err instanceof BadRequestError) {
-      throw err;
-    }
+    records = await dns.lookup(hostname, { all: true });
+  } catch {
     throw new BadRequestError(`Unable to resolve upstream hostname: ${hostname}`);
   }
 
-  return parsed;
+  if (records.length === 0) {
+    throw new BadRequestError(`Unable to resolve upstream hostname: ${hostname}`);
+  }
+
+  for (const record of records) {
+    if (isBlockedAddress(record.address)) {
+      throw new BadRequestError(`Upstream host resolves to restricted IP range (${record.address}).`);
+    }
+  }
+
+  const chosen = records[0];
+  return {
+    url: parsed,
+    hostname,
+    pinnedAddress: unwrapMappedIpv4(chosen.address),
+    family: familyOf(chosen.address),
+  };
 }

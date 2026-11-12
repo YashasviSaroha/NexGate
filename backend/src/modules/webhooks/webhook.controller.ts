@@ -1,7 +1,12 @@
 import { Request, Response, NextFunction } from 'express';
 import { prisma } from '../../config/database.js';
 import { generateRandomToken } from '../../utils/crypto.js';
+import { validateUpstreamUrl } from '../../utils/ssrf.js';
 import { NotFoundError } from '../../utils/errors.js';
+
+function previewSecret(secret: string): string {
+  return `${secret.slice(0, 12)}••••`;
+}
 
 export class WebhookController {
   async listWebhooks(req: Request, res: Response, next: NextFunction) {
@@ -13,7 +18,10 @@ export class WebhookController {
         },
         orderBy: { createdAt: 'desc' },
       });
-      res.json({ success: true, data: webhooks });
+      res.json({
+        success: true,
+        data: webhooks.map((webhook) => ({ ...webhook, secret: previewSecret(webhook.secret) })),
+      });
     } catch (err) {
       next(err);
     }
@@ -22,6 +30,7 @@ export class WebhookController {
   async createWebhook(req: Request, res: Response, next: NextFunction) {
     try {
       const { url, events } = req.body;
+      await validateUpstreamUrl(url);
       const secret = `whsec_${generateRandomToken(24)}`;
 
       const webhook = await prisma.webhook.create({
@@ -42,8 +51,13 @@ export class WebhookController {
 
   async deleteWebhook(req: Request, res: Response, next: NextFunction) {
     try {
+      const existing = await prisma.webhook.findFirst({
+        where: { id: req.params.webhookId, organizationId: req.params.orgId },
+      });
+      if (!existing) throw new NotFoundError('Webhook not found.');
+
       await prisma.webhook.delete({
-        where: { id: req.params.webhookId },
+        where: { id: existing.id },
       });
       res.json({ success: true, data: { message: 'Webhook deleted.' } });
     } catch (err) {
@@ -53,8 +67,13 @@ export class WebhookController {
 
   async listDeliveries(req: Request, res: Response, next: NextFunction) {
     try {
+      const webhook = await prisma.webhook.findFirst({
+        where: { id: req.params.webhookId, organizationId: req.params.orgId },
+      });
+      if (!webhook) throw new NotFoundError('Webhook not found.');
+
       const deliveries = await prisma.webhookDelivery.findMany({
-        where: { webhookId: req.params.webhookId },
+        where: { webhookId: webhook.id },
         orderBy: { createdAt: 'desc' },
         take: 50,
       });

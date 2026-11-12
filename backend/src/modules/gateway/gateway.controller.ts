@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { gatewayService } from './gateway.service.js';
+import { gatewayService, STRIPPED_RESPONSE_HEADERS } from './gateway.service.js';
 
 export class GatewayController {
   async handleProxy(req: Request, res: Response, next: NextFunction) {
@@ -7,7 +7,7 @@ export class GatewayController {
       const { apiSlug, version } = req.params;
       const subPath = (req.params as any)[0] || '';
 
-      const clientIp = (req.headers['x-forwarded-for'] as string) || req.ip || req.socket.remoteAddress;
+      const clientIp = req.ip || req.socket.remoteAddress;
 
       const result = await gatewayService.handleGatewayRequest({
         apiSlug,
@@ -28,7 +28,7 @@ export class GatewayController {
 
       // Set upstream headers (excluding hop-by-hop)
       for (const [key, val] of Object.entries(result.headers)) {
-        if (!['transfer-encoding', 'connection', 'keep-alive'].includes(key.toLowerCase()) && val) {
+        if (!STRIPPED_RESPONSE_HEADERS.includes(key.toLowerCase()) && val) {
           res.setHeader(key, val);
         }
       }

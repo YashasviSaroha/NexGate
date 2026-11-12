@@ -17,6 +17,18 @@ router.get('/weather/current', (req: Request, res: Response) => {
   });
 });
 
+router.get('/catalog/products', (req: Request, res: Response) => {
+  res.json({
+    data: [
+      { id: 'sku_100', name: 'Nimbus Sensor', price: 49, currency: 'USD' },
+      { id: 'sku_240', name: 'Harbor Cable', price: 18, currency: 'USD' },
+      { id: 'sku_318', name: 'Field Notebook', price: 12, currency: 'USD' },
+    ],
+    source: 'NexGate Sample Catalog',
+    sample: true,
+  });
+});
+
 router.get('/users', (req: Request, res: Response) => {
   res.json({
     data: [

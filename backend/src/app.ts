@@ -18,6 +18,10 @@ import requestLogRoutes from './modules/requestlogs/requestlog.routes.js';
 import webhookRoutes from './modules/webhooks/webhook.routes.js';
 import gatewayRoutes from './modules/gateway/gateway.routes.js';
 import mockRoutes from './modules/mock/mock.routes.js';
+import aiRoutes from './modules/ai/ai.routes.js';
+import demoRoutes from './modules/demo/demo.routes.js';
+import { denyDemoMutation } from './middleware/demoGuard.js';
+import { testDbConnection } from './config/database.js';
 
 const app = express();
 
@@ -53,6 +57,14 @@ app.use((req, res, next) => {
   next();
 });
 
+app.get('/', (_req, res) => {
+  res.json({
+    product: 'NexGate',
+    status: 'up',
+    health: '/health',
+  });
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({
@@ -63,8 +75,21 @@ app.get('/health', (req, res) => {
   });
 });
 
+app.get('/health/ready', async (req, res) => {
+  const database = await testDbConnection();
+  res.status(database ? 200 : 503).json({
+    status: database ? 'ready' : 'unavailable',
+    database: database ? 'up' : 'down',
+    timestamp: new Date().toISOString(),
+  });
+});
+
+app.use(denyDemoMutation);
+
 // Mount Modules
 app.use('/api/v1/auth', authRoutes);
+app.use('/api/v1/demo', demoRoutes);
+app.use('/api/v1/ai', aiRoutes);
 app.use('/api/v1/organizations', orgRoutes);
 app.use('/api/v1/organizations/:orgId/apis', apiRoutes);
 app.use('/api/v1/organizations/:orgId/applications', appRoutes);

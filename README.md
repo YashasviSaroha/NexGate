@@ -150,11 +150,22 @@ npm install
 npm run dev
 ```
 
-Visit **http://localhost:5173** to access the NexGate Developer Portal.
+Visit **http://localhost:5173**.
 
-**Default Demo Credentials:**
-- Email: `admin@nexgate.dev`
-- Password: `Password123!`
+The home page offers two ways in:
+
+- **Instant Demo** at `/demo` opens a read-only sample workspace. It does not use a shared administrator password.
+- **Full registration** at `/auth/register` creates a private organization. Choose **Publish APIs** (owner) or **Consume APIs** (developer).
+
+Apply the database schema, then seed local sample data:
+
+```bash
+cd backend
+npx prisma db push
+npm run prisma:seed
+```
+
+The seed still creates a local operator for development. Do not publish that password or reuse it on a public deployment. Visitors should use Instant Demo.
 
 ---
 
@@ -201,3 +212,32 @@ All test suites cover:
 - SSRF prevention, IP restriction, and cloud metadata access blocks
 - Distributed atomic sliding window rate limiting
 - Gateway routing, 401 missing key rejection, and health endpoints
+- Demo sessions cannot create APIs, keys, or organization settings
+- Gemini prompts drop API keys and bearer tokens before they are sent
+
+---
+
+## Instant Demo and registration
+
+| Path | Who | What they can do |
+| --- | --- | --- |
+| `/demo` | Visitor, no account | Read the **NexGate Demo** organization, call the sandbox gateway, use a capped Gemini assistant |
+| `/auth/register` | New account | Own a separate organization and publish or consume APIs |
+
+Demo traffic lives on organization slug `public-demo`. Registered organizations are separate memberships. A demo session that tries to create an API, key, or webhook receives **403**. `POST /api/v1/demo/reset` deletes live demo logs and keeps the labeled sample history.
+
+## Gemini assistant
+
+The assistant calls Google Gemini from the backend with `GEMINI_API_KEY`. The browser never receives the key. Requests are limited per day (`DEMO_DAILY_AI_LIMIT`, `USER_DAILY_AI_LIMIT`), timed out, and retried once on a temporary Gemini failure. Documentation, error explanations, and traffic insights run only when someone asks. Examples always use the placeholder `YOUR_API_KEY`.
+
+## Deployment
+
+Hosting steps, environment variables, and migration notes are in [DEPLOYMENT.md](DEPLOYMENT.md). Architecture is in [ARCHITECTURE.md](ARCHITECTURE.md). HTTP routes are in [API_DOCUMENTATION.md](API_DOCUMENTATION.md).
+
+## Known limitations
+
+- Password reset stores a token and does not send email.
+- Webhook deliveries are recorded, not pushed to subscribers.
+- The public demo is one shared read-only visitor, not a private workspace per browser.
+- Gemini stays disabled until `GEMINI_API_KEY` is set on the server.
+- This repository does not include a live production URL until you deploy it.

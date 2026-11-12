@@ -20,7 +20,7 @@ import { Input } from '../../components/ui/Input.js';
 import { Badge } from '../../components/ui/Badge.js';
 
 export function PlaygroundPage() {
-  const { currentOrg } = useAuth();
+  const { currentOrg, user } = useAuth();
   const { success, error } = useToast();
 
   const [apis, setApis] = useState<any[]>([]);
@@ -50,11 +50,17 @@ export function PlaygroundPage() {
 
         if (apisRes.data?.success && apisRes.data.data.length > 0) {
           setApis(apisRes.data.data);
-          setSelectedApiSlug(apisRes.data.data[0].slug);
+          const slug = apisRes.data.data[0].slug;
+          setSelectedApiSlug(slug);
+          setSubPath(slug.includes('catalog') ? 'products' : 'current');
         }
 
         if (appsRes.data?.success) {
           setApps(appsRes.data.data);
+        }
+        if (user?.demo) {
+          const sandbox = sessionStorage.getItem('nexgate-sandbox-key');
+          if (sandbox) setApiKey(sandbox);
         }
       } catch (e) {
         console.error('Error fetching playground prerequisites:', e);
@@ -62,7 +68,7 @@ export function PlaygroundPage() {
     }
 
     fetchData();
-  }, [currentOrg]);
+  }, [currentOrg, user?.demo]);
 
   const handleSendRequest = async () => {
     if (!selectedApiSlug) {
@@ -74,13 +80,24 @@ export function PlaygroundPage() {
       return;
     }
 
+    let payload: unknown;
+    if (['POST', 'PUT', 'PATCH'].includes(method)) {
+      try {
+        payload = JSON.parse(requestBody || '{}');
+      } catch {
+        error('Invalid JSON', 'The request body is not valid JSON.');
+        return;
+      }
+    }
+
     setIsLoading(true);
     setResponse(null);
 
     const startTime = performance.now();
 
     // Construct the gateway URL
-    let gatewayUrl = `/gateway/${selectedApiSlug}/${apiVersion}/${subPath.replace(/^\//, '')}`;
+    const gatewayOrigin = (import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000').replace(/\/$/, '');
+    let gatewayUrl = `${gatewayOrigin}/gateway/${selectedApiSlug}/${apiVersion}/${subPath.replace(/^\//, '')}`;
     if (queryParams.trim()) {
       gatewayUrl += `?${queryParams.trim()}`;
     }
@@ -93,7 +110,7 @@ export function PlaygroundPage() {
           'X-API-Key': apiKey.trim(),
           'Content-Type': 'application/json',
         },
-        data: ['POST', 'PUT', 'PATCH'].includes(method) ? JSON.parse(requestBody || '{}') : undefined,
+        data: payload,
         validateStatus: () => true, // Don't throw on 4xx/5xx so we can inspect the gateway response!
       });
 
@@ -176,7 +193,11 @@ export function PlaygroundPage() {
               <label className="text-xs font-semibold text-muted-foreground">Target API</label>
               <select
                 value={selectedApiSlug}
-                onChange={(e) => setSelectedApiSlug(e.target.value)}
+                onChange={(e) => {
+                  const slug = e.target.value;
+                  setSelectedApiSlug(slug);
+                  setSubPath(slug.includes('catalog') ? 'products' : 'current');
+                }}
                 className="w-full h-9 px-2 text-xs rounded-lg border border-border bg-card text-foreground focus:ring-1 focus:ring-primary"
               >
                 {apis.map((api) => (

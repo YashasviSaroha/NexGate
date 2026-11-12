@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { CheckCircle2, AlertTriangle, AlertCircle, Info, X } from 'lucide-react';
 import { cn } from '../lib/cn.js';
 
@@ -51,6 +51,15 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   const error = useCallback((title: string, message?: string) => showToast({ type: 'error', title, message }), [showToast]);
   const warning = useCallback((title: string, message?: string) => showToast({ type: 'warning', title, message }), [showToast]);
   const info = useCallback((title: string, message?: string) => showToast({ type: 'info', title, message }), [showToast]);
+
+  useEffect(() => {
+    const onDenied = (event: Event) => {
+      const message = (event as CustomEvent<string>).detail;
+      error('Demo is read-only', typeof message === 'string' ? message : 'This action is not available in the demo.');
+    };
+    window.addEventListener('nexgate-demo-denied', onDenied);
+    return () => window.removeEventListener('nexgate-demo-denied', onDenied);
+  }, [error]);
 
   return (
     <ToastContext.Provider value={{ toasts, showToast, removeToast, success, error, warning, info }}>

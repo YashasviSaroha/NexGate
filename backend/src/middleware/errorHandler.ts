@@ -1,6 +1,26 @@
 import { Request, Response, NextFunction } from 'express';
+import { Prisma } from '@prisma/client';
 import { AppError } from '../utils/errors.js';
 import { ZodError } from 'zod';
+
+function databaseError(err: Error): { statusCode: number; message: string } | null {
+  if (
+    err instanceof Prisma.PrismaClientInitializationError ||
+    err instanceof Prisma.PrismaClientRustPanicError ||
+    /can't reach database server/i.test(err.message)
+  ) {
+    return { statusCode: 503, message: 'The database is unavailable. Try again in a moment.' };
+  }
+  if (err instanceof Prisma.PrismaClientKnownRequestError) {
+    if (err.code === 'P2002') return { statusCode: 409, message: 'That value is already in use.' };
+    if (err.code === 'P2025') return { statusCode: 404, message: 'The record was not found.' };
+    return { statusCode: 500, message: 'The database request could not be completed.' };
+  }
+  if (err instanceof Prisma.PrismaClientUnknownRequestError) {
+    return { statusCode: 500, message: 'The database request could not be completed.' };
+  }
+  return null;
+}
 
 export function errorHandler(
   err: Error,
@@ -49,12 +69,21 @@ export function errorHandler(
     return;
   }
 
-  // Unexpected server error
+  const database = databaseError(err);
+  if (database) {
+    console.error('Database error:', err);
+    res.status(database.statusCode).json({
+      success: false,
+      error: { message: database.message, statusCode: database.statusCode },
+    });
+    return;
+  }
+
   console.error('💥 Unhandled Exception:', err);
   res.status(500).json({
     success: false,
     error: {
-      message: process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message,
+      message: 'Something went wrong. Please try again.',
       statusCode: 500,
     },
   });

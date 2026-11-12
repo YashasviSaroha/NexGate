@@ -20,6 +20,12 @@ apiClient.interceptors.response.use(
     ) {
       // Allow component to catch and handle gracefully
     }
+    if (error.response?.status === 403) {
+      const message = error.response?.data?.error?.message;
+      if (typeof message === 'string' && message.startsWith('Demo workspace')) {
+        window.dispatchEvent(new CustomEvent('nexgate-demo-denied', { detail: message }));
+      }
+    }
     return Promise.reject(error);
   }
 );

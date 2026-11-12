@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { prisma } from '../config/database.js';
-import { ForbiddenError, NotFoundError, UnauthorizedError } from '../utils/errors.js';
+import { AppError, ForbiddenError, UnauthorizedError } from '../utils/errors.js';
 
 export async function attachOrgContext(
   req: Request,
@@ -42,16 +42,10 @@ export async function attachOrgContext(
     };
 
     next();
-  } catch (err: any) {
-    if (err.message?.includes("Can't reach database server") || err.code === 'P1001') {
-      // In offline/demo mode without PostgreSQL running
-      req.organization = {
-        id: orgId || '00000000-0000-0000-0000-000000000002',
-        name: 'NexGate Engineering',
-        slug: 'nexgate-demo',
-        userRole: 'OWNER',
-      };
-      return next();
+  } catch (err: unknown) {
+    const error = err as { message?: string; code?: string };
+    if (error.code === 'P1001' || error.message?.includes("Can't reach database server")) {
+      throw new AppError('Database is unavailable.', 503);
     }
     throw err;
   }

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   ScrollText,
   Search,
@@ -18,6 +19,7 @@ import { formatDate } from '../../lib/formatters.js';
 
 export function RequestLogsPage() {
   const { currentOrg } = useAuth();
+  const navigate = useNavigate();
 
   const [logs, setLogs] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
@@ -173,7 +175,10 @@ export function RequestLogsPage() {
                       </span>
                     </td>
                     <td className="p-3 font-mono text-foreground font-medium max-w-[220px] truncate">
-                      {log.path}
+                      <span className="inline-flex items-center gap-2">
+                        <span className="truncate">{log.path}</span>
+                        {log.errorCategory === 'demo-sample' && <Badge variant="outline">Sample</Badge>}
+                      </span>
                     </td>
                     <td className="p-3">
                       <Badge
@@ -280,13 +285,21 @@ export function RequestLogsPage() {
                 <p className="p-2.5 rounded bg-muted/30 font-mono text-xs break-all">{selectedLog.path}</p>
               </div>
 
-              {selectedLog.errorCategory && (
+              {selectedLog.errorCategory === 'demo-sample' && (
+                <Badge variant="outline">Sample history</Badge>
+              )}
+              {selectedLog.errorCategory && selectedLog.errorCategory !== 'demo-sample' && (
                 <div className="space-y-1">
                   <span className="font-semibold text-destructive uppercase text-[10px]">Error Category</span>
                   <p className="p-2.5 rounded bg-destructive/10 text-destructive font-mono text-xs">
                     {selectedLog.errorCategory}
                   </p>
                 </div>
+              )}
+              {selectedLog.statusCode >= 400 && (
+                <Button type="button" onClick={() => navigate(`/assistant?log=${selectedLog.id}`)}>
+                  Explain this request
+                </Button>
               )}
             </div>
           </div>
