@@ -3,6 +3,15 @@
 
 NexGate is a self-service API management and developer gateway designed to unify upstream service routing, distributed rate-limiting, credential isolation, and developer consumption.
 
+## Live deployments
+
+| App | URL |
+| --- | --- |
+| Frontend | https://nex-gate-frontend.vercel.app |
+| Backend | https://nex-gate-backend.vercel.app/ |
+
+Open the frontend and choose **Instant Demo**. The API health check is https://nex-gate-backend.vercel.app/health.
+
 ---
 
 ## 🚀 Key Architectural Pillars
@@ -232,6 +241,8 @@ The assistant calls Google Gemini from the backend with `GEMINI_API_KEY`. The br
 
 ## Deployment
 
+The live site is https://nex-gate-frontend.vercel.app. The API is https://nex-gate-backend.vercel.app/.
+
 Hosting steps, environment variables, and migration notes are in [DEPLOYMENT.md](DEPLOYMENT.md). Architecture is in [ARCHITECTURE.md](ARCHITECTURE.md). HTTP routes are in [API_DOCUMENTATION.md](API_DOCUMENTATION.md).
 
 ## Known limitations
@@ -240,4 +251,3 @@ Hosting steps, environment variables, and migration notes are in [DEPLOYMENT.md]
 - Webhook deliveries are recorded, not pushed to subscribers.
 - The public demo is one shared read-only visitor, not a private workspace per browser.
 - Gemini stays disabled until `GEMINI_API_KEY` is set on the server.
-- This repository does not include a live production URL until you deploy it.
